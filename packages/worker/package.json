@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "@gallery/shared": "*",
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "blurhash": "^2.0.5",
     "bullmq": "^5.78.1",
     "ioredis": "^5.11.1",
-    "sharp": "^0.35.1"
+    "sharp": "^0.35.1",
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "tsx": "^4.22.4",

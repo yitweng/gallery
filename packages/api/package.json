@@ -11,9 +11,10 @@
   },
   "dependencies": {
     "@gallery/shared": "*",
-    "@prisma/client": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "bcryptjs": "^2.4.3",
+    "blurhash": "^2.0.5",
     "bullmq": "^5.78.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
@@ -21,6 +22,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
     "sharp": "^0.35.1",
+    "uuid": "^14.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

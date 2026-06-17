@@ -1,9 +1,18 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
+import { Queue } from "bullmq";
+import { v4 as uuid } from "uuid";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { p } from "../middleware/params.js";
+import { storage } from "../storage/index.js";
 import { PHOTO_ACCEPT_MIMES, MAX_UPLOAD_SIZE } from "@gallery/shared";
+
+const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+
+const processImageQueue = new Queue("process-image", {
+  connection: { url: REDIS_URL },
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -19,40 +28,61 @@ const upload = multer({
 
 export const photosRouter = Router();
 
-photosRouter.post("/upload/:galleryId", requireAuth, upload.array("photos", 50), async (req: Request, res: Response) => {
-  const galleryId = p(req, "galleryId");
-  const gallery = await prisma.gallery.findFirst({
-    where: { id: galleryId, userId: req.user!.userId },
-  });
-  if (!gallery) {
-    res.status(404).json({ error: "NOT_FOUND", message: "Gallery not found", statusCode: 404 });
-    return;
-  }
+photosRouter.post(
+  "/upload/:galleryId",
+  requireAuth,
+  upload.array("photos", 50),
+  async (req: Request, res: Response) => {
+    const galleryId = p(req, "galleryId");
+    const gallery = await prisma.gallery.findFirst({
+      where: { id: galleryId, userId: req.user!.userId },
+    });
+    if (!gallery) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Gallery not found", statusCode: 404 });
+      return;
+    }
 
-  const collectionId = req.body.collectionId as string | undefined;
-  const files = req.files as Express.Multer.File[];
-  if (!files || files.length === 0) {
-    res.status(400).json({ error: "VALIDATION", message: "No files uploaded", statusCode: 400 });
-    return;
-  }
+    const collectionId = req.body.collectionId as string | undefined;
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      res.status(400).json({ error: "VALIDATION", message: "No files uploaded", statusCode: 400 });
+      return;
+    }
 
-  const photos = await Promise.all(
-    files.map(async (file) => {
-      const photo = await prisma.photo.create({
-        data: {
-          galleryId,
-          collectionId: collectionId || null,
-          originalKey: `pending/${Date.now()}-${file.originalname}`,
+    let sortCounter = 0;
+    const photos = await Promise.all(
+      files.map(async (file) => {
+        const id = uuid();
+        const ext = file.originalname.split(".").pop() || "jpg";
+        const key = `photos/${id}/original.${ext}`;
+
+        await storage.upload(key, file.buffer, file.mimetype);
+
+        const photo = await prisma.photo.create({
+          data: {
+            id,
+            galleryId,
+            collectionId: collectionId || null,
+            originalKey: key,
+            fileName: file.originalname,
+            fileSize: BigInt(file.size),
+            sortOrder: sortCounter++,
+          },
+        });
+
+        await processImageQueue.add(`process-${id}`, {
+          photoId: id,
+          buffer: file.buffer,
           fileName: file.originalname,
-          fileSize: BigInt(file.size),
-        },
-      });
-      return photo;
-    })
-  );
+        });
 
-  res.status(201).json({ uploaded: photos.length, photos });
-});
+        return photo;
+      })
+    );
+
+    res.status(201).json({ uploaded: photos.length, photos });
+  }
+);
 
 photosRouter.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   const id = p(req, "id");
@@ -83,6 +113,28 @@ photosRouter.delete("/:id", requireAuth, async (req: Request, res: Response) => 
     return;
   }
 
+  if (photo.thumbnailKey) await storage.delete(photo.thumbnailKey).catch(() => {});
+  if (photo.previewKey) await storage.delete(photo.previewKey).catch(() => {});
+  if (photo.originalKey) await storage.delete(photo.originalKey).catch(() => {});
+
   await prisma.photo.delete({ where: { id } });
   res.json({ deleted: true });
+});
+
+photosRouter.get("/:id", async (req: Request, res: Response) => {
+  const id = p(req, "id");
+  const photo = await prisma.photo.findUnique({ where: { id } });
+  if (!photo) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Photo not found", statusCode: 404 });
+    return;
+  }
+
+  const publicUrl = process.env.STORAGE_PUBLIC_URL || "http://localhost:9000";
+
+  res.json({
+    ...photo,
+    thumbnailUrl: photo.thumbnailKey ? `${publicUrl}/${photo.thumbnailKey}` : null,
+    previewUrl: photo.previewKey ? `${publicUrl}/${photo.previewKey}` : null,
+    originalUrl: photo.originalKey ? `${publicUrl}/${photo.originalKey}` : null,
+  });
 });

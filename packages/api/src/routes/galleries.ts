@@ -1,7 +1,18 @@
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
-import { p } from "../middleware/params.js";
+import { p, qn } from "../middleware/params.js";
+
+const PUBLIC_URL = process.env.STORAGE_PUBLIC_URL || "http://localhost:9000";
+
+function photoWithUrls(photo: Record<string, unknown>) {
+  return {
+    ...photo,
+    thumbnailUrl: photo.thumbnailKey ? `${PUBLIC_URL}/${photo.thumbnailKey}` : null,
+    previewUrl: photo.previewKey ? `${PUBLIC_URL}/${photo.previewKey}` : null,
+    originalUrl: photo.originalKey ? `${PUBLIC_URL}/${photo.originalKey}` : null,
+  };
+}
 
 export const galleriesRouter = Router();
 
@@ -15,7 +26,7 @@ galleriesRouter.get("/public/:slug", async (req: Request, res: Response) => {
         include: {
           photos: {
             orderBy: { sortOrder: "asc" },
-            take: 20,
+            take: 100,
           },
         },
       },
@@ -27,9 +38,15 @@ galleriesRouter.get("/public/:slug", async (req: Request, res: Response) => {
     return;
   }
 
-  const { password, downloadPin, userId, ...safe } = gallery as Record<string, unknown>;
+  const { password, downloadPin, userId, ...safe } = gallery;
+  const collections = gallery.collections.map((c) => ({
+    ...c,
+    photos: c.photos.map(photoWithUrls),
+  }));
+
   res.json({
     ...safe,
+    collections,
     protected: !!password,
     downloadProtected: !!downloadPin,
   });
@@ -79,7 +96,13 @@ galleriesRouter.get("/:id", requireAuth, async (req: Request, res: Response) => 
     res.status(404).json({ error: "NOT_FOUND", message: "Gallery not found", statusCode: 404 });
     return;
   }
-  res.json(gallery);
+  res.json({
+    ...gallery,
+    collections: gallery.collections.map((c) => ({
+      ...c,
+      photos: c.photos.map(photoWithUrls),
+    })),
+  });
 });
 
 galleriesRouter.post("/", requireAuth, async (req: Request, res: Response) => {
@@ -115,6 +138,28 @@ galleriesRouter.patch("/:id", requireAuth, async (req: Request, res: Response) =
   res.json(updated);
 });
 
+galleriesRouter.post("/:id/collections", requireAuth, async (req: Request, res: Response) => {
+  const id = p(req, "id");
+  const gallery = await prisma.gallery.findFirst({
+    where: { id, userId: req.user!.userId },
+  });
+  if (!gallery) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Gallery not found", statusCode: 404 });
+    return;
+  }
+
+  const { title } = req.body;
+  if (!title) {
+    res.status(400).json({ error: "VALIDATION", message: "Title is required", statusCode: 400 });
+    return;
+  }
+
+  const collection = await prisma.collection.create({
+    data: { title, galleryId: id },
+  });
+  res.status(201).json(collection);
+});
+
 galleriesRouter.delete("/:id", requireAuth, async (req: Request, res: Response) => {
   const id = p(req, "id");
   const gallery = await prisma.gallery.findFirst({
@@ -139,8 +184,8 @@ galleriesRouter.get("/:id/photos", async (req: Request, res: Response) => {
     return;
   }
 
-  const page = parseInt(p(req, "page") || "1") || 1;
-  const pageSize = Math.min(parseInt(p(req, "pageSize") || "50") || 50, 200);
+  const page = qn(req, "page") || 1;
+  const pageSize = Math.min(qn(req, "pageSize") || 50, 200);
   const collectionId = req.query.collectionId
     ? (Array.isArray(req.query.collectionId) ? req.query.collectionId[0] : req.query.collectionId)
     : undefined;
@@ -158,7 +203,7 @@ galleriesRouter.get("/:id/photos", async (req: Request, res: Response) => {
   ]);
 
   res.json({
-    items: photos,
+    items: photos.map(photoWithUrls),
     total,
     page,
     pageSize,
