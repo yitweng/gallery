@@ -43,6 +43,22 @@ galleriesRouter.get("/public/:slug", async (req: Request, res: Response) => {
     photos: c.photos.map(photoWithUrls),
   }));
 
+  // Fetch uncategorized photos
+  const uncategorizedPhotos = await prisma.photo.findMany({
+    where: { galleryId: gallery.id, collectionId: null },
+    orderBy: { sortOrder: "asc" },
+    take: 200,
+  });
+
+  if (uncategorizedPhotos.length > 0) {
+    collections.push({
+      id: "__all__",
+      title: "All Photos",
+      sortOrder: -1,
+      photos: uncategorizedPhotos.map(photoWithUrls),
+    } as ReturnType<typeof collections>[0]);
+  }
+
   res.json({
     ...safe,
     collections,
