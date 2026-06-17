@@ -5,15 +5,26 @@ import { useState, useEffect, useRef, useCallback } from "react";
 function getToken() { return localStorage.getItem("gallery_token"); }
 function setToken(t: string) { localStorage.setItem("gallery_token", t); }
 
-async function apiCall(path: string, options: RequestInit = {}) {
+async function apiCall(path: string, options: Record<string, unknown> = {}) {
   const token = getToken();
-  const headers: Record<string, string> = { ...options.headers as Record<string, string> || {} };
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string> || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  if (options.body && typeof options.body !== "string" && !(options.body instanceof FormData)) {
+
+  let body: BodyInit | undefined;
+  if (options.body instanceof FormData) {
+    body = options.body;
+  } else if (options.body && typeof options.body !== "string") {
     headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(options.body);
+    body = JSON.stringify(options.body);
+  } else if (typeof options.body === "string") {
+    body = options.body;
   }
-  const res = await fetch(path, { ...options, headers });
+
+  const res = await fetch(path, {
+    method: (options.method as string) || "GET",
+    headers,
+    body,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
     throw new Error(err.message || `HTTP ${res.status}`);
