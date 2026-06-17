@@ -2,15 +2,14 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { p, qn } from "../middleware/params.js";
-
-const PUBLIC_URL = process.env.STORAGE_PUBLIC_URL || "http://localhost:9000";
+import { storage } from "../storage/index.js";
 
 function photoWithUrls(photo: Record<string, unknown>) {
   return {
     ...photo,
-    thumbnailUrl: photo.thumbnailKey ? `${PUBLIC_URL}/${photo.thumbnailKey}` : null,
-    previewUrl: photo.previewKey ? `${PUBLIC_URL}/${photo.previewKey}` : null,
-    originalUrl: photo.originalKey ? `${PUBLIC_URL}/${photo.originalKey}` : null,
+    thumbnailUrl: photo.thumbnailKey ? storage.getPublicUrl(photo.thumbnailKey as string) : null,
+    previewUrl: photo.previewKey ? storage.getPublicUrl(photo.previewKey as string) : null,
+    originalUrl: photo.originalKey ? storage.getPublicUrl(photo.originalKey as string) : null,
   };
 }
 

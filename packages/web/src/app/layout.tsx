@@ -6,16 +6,10 @@ export const metadata: Metadata = {
   description: "Photo gallery delivery",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-stone-50 text-stone-900 antialiased">
-        {children}
-      </body>
+    <html lang="en" className="bg-[#0a0a0a]">
+      <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
 }

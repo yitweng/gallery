@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 function getToken() { return localStorage.getItem("gallery_token"); }
 function setToken(t: string) { localStorage.setItem("gallery_token", t); }
+
+interface Gallery { id: string; title: string; slug: string; status: string; _count: { photos: number } }
+interface Photo { id: string; fileName: string; thumbnailUrl: string | null; originalUrl: string | null }
+interface CollectionData { id: string; title: string; photos: Photo[] }
 
 async function apiCall(path: string, options: Record<string, unknown> = {}) {
   const token = getToken();
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
   let body: BodyInit | undefined;
   if (options.body instanceof FormData) {
     body = options.body;
@@ -17,12 +20,7 @@ async function apiCall(path: string, options: Record<string, unknown> = {}) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-
-  const res = await fetch(path, {
-    method: (options.method as string) || "GET",
-    headers,
-    body,
-  });
+  const res = await fetch(path, { method: (options.method as string) || "GET", headers, body });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
     throw new Error(err.message || `HTTP ${res.status}`);
@@ -30,162 +28,114 @@ async function apiCall(path: string, options: Record<string, unknown> = {}) {
   return res.json();
 }
 
-interface Gallery { id: string; title: string; slug: string; status: string; _count: { photos: number } }
-interface Photo { id: string; fileName: string; thumbnailUrl: string | null; originalUrl: string | null }
-interface CollectionData { id: string; title: string; photos: Photo[] }
-
 export default function AdminApp() {
   const [view, setView] = useState<"login" | "list" | "gallery">("login");
   const [galleries, setGalleries] = useState<Gallery[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Login
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Gallery detail state
+  // Gallery detail
   const [activeGallery, setActiveGallery] = useState<Gallery | null>(null);
-  const [collections, setCollections] = useState<CollectionData[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [selectedCollection, setSelectedCollection] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (getToken()) {
-      setView("list");
-      loadGalleries();
-    }
-  }, []);
+  useEffect(() => { if (getToken()) { setView("list"); loadGalleries(); } }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const data = await apiCall("/api/auth/login", {
-        method: "POST",
-        body: { email, password },
-      });
+      const data = await apiCall("/api/auth/login", { method: "POST", body: { email, password } });
       setToken(data.token);
       setView("list");
       await loadGalleries();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : "Login failed"); }
+    finally { setLoading(false); }
   }
 
   async function loadGalleries() {
-    try {
-      const data = await apiCall("/api/galleries");
-      setGalleries(data);
-    } catch {
-      setToken("");
-    }
+    try { setGalleries(await apiCall("/api/galleries")); }
+    catch { setToken(""); }
   }
 
-  async function loadGalleryDetail(galleryId: string) {
-    try {
-      const photoData = await apiCall(`/api/galleries/${galleryId}/photos?pageSize=200`);
-      setPhotos(photoData.items || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    }
+  async function loadPhotos(galleryId: string) {
+    try { setPhotos((await apiCall(`/api/galleries/${galleryId}/photos?pageSize=200`)).items || []); }
+    catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
   }
 
-  async function handleCreateGallery() {
+  async function handleCreate() {
     const title = prompt("Gallery title:");
     if (!title) return;
-    const slug = prompt("URL slug (e.g., june-wedding):", title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""));
+    const slug = prompt("URL slug:", title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""));
     if (!slug) return;
-    try {
-      await apiCall("/api/galleries", { method: "POST", body: { title, slug } });
-      await loadGalleries();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed");
-    }
+    try { await apiCall("/api/galleries", { method: "POST", body: { title, slug } }); await loadGalleries(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Failed"); }
   }
 
-  async function handlePublish(gallery: Gallery) {
-    const newStatus = gallery.status === "PUBLISHED" ? "DRAFT" : "PUBLISHED";
-    await apiCall(`/api/galleries/${gallery.id}`, { method: "PATCH", body: { status: newStatus } });
+  async function handlePublish(g: Gallery) {
+    await apiCall(`/api/galleries/${g.id}`, { method: "PATCH", body: { status: g.status === "PUBLISHED" ? "DRAFT" : "PUBLISHED" } });
     await loadGalleries();
   }
 
   async function handleUpload(files: FileList) {
-    if (files.length === 0 || !activeGallery) return;
+    if (!files.length || !activeGallery) return;
     setUploading(true);
     setError("");
-
-    const batches = [];
     const arr = Array.from(files);
     for (let i = 0; i < arr.length; i += 10) {
-      batches.push(arr.slice(i, i + 10));
-    }
-
-    for (let i = 0; i < batches.length; i++) {
       const fd = new FormData();
-      batches[i].forEach((f) => fd.append("photos", f));
-      if (selectedCollection) fd.append("collectionId", selectedCollection);
-
-      try {
-        await apiCall(`/api/photos/upload/${activeGallery.id}`, {
-          method: "POST",
-          body: fd,
-        });
-      } catch (err) {
-        setError(`Batch ${i + 1} failed: ${err instanceof Error ? err.message : "Upload error"}`);
-        break;
-      }
+      arr.slice(i, i + 10).forEach((f) => fd.append("photos", f));
+      try { await apiCall(`/api/photos/upload/${activeGallery.id}`, { method: "POST", body: fd }); }
+      catch (err) { setError(err instanceof Error ? err.message : "Upload failed"); break; }
     }
-
     setUploading(false);
-    await loadGalleryDetail(activeGallery.id);
+    await loadPhotos(activeGallery.id);
   }
 
-  function handleLogout() {
-    setToken("");
-    setView("login");
-    setGalleries([]);
-    setActiveGallery(null);
-  }
+  function handleLogout() { setToken(""); setView("login"); setGalleries([]); setActiveGallery(null); }
 
-  // Login view
+  // ─── LOGIN ──────────────────────────────────────────────────────
   if (view === "login") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-50 px-4">
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center px-6">
         <div className="w-full max-w-sm">
-          <h1 className="text-2xl font-light text-center text-stone-800 mb-8">Gallery Admin</h1>
-          <form onSubmit={handleLogin} className="space-y-4">
-            {error && <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">{error}</div>}
+          <form onSubmit={handleLogin} className="space-y-6">
             <div>
+              <h1 className="text-2xl font-light text-white tracking-tight">Sign in</h1>
+              <p className="text-sm text-[#555] mt-1">Gallery admin</p>
+            </div>
+
+            {error && (
+              <div className="text-sm text-red-400 bg-red-400/5 border border-red-400/10 rounded-[8px] px-4 py-3">
+                {error}
+              </div>
+            )}
+
+            <div className="space-y-4">
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email"
-                required
-                className="w-full px-4 py-3 border border-stone-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-stone-400 focus:border-transparent"
+                type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email" required
+                className="w-full bg-[#111] border border-[#222] rounded-[8px] px-4 py-3 text-sm text-white placeholder:text-[#444] focus:outline-none focus:border-[#333] transition-colors"
+              />
+              <input
+                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password" required
+                className="w-full bg-[#111] border border-[#222] rounded-[8px] px-4 py-3 text-sm text-white placeholder:text-[#444] focus:outline-none focus:border-[#333] transition-colors"
               />
             </div>
-            <div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                required
-                className="w-full px-4 py-3 border border-stone-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-stone-400 focus:border-transparent"
-              />
-            </div>
+
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 bg-stone-900 text-white rounded-lg font-medium hover:bg-stone-800 disabled:opacity-50 transition-colors"
+              type="submit" disabled={loading}
+              className="w-full py-3 bg-white text-black text-sm font-medium rounded-[8px] hover:bg-[#e5e5e5] disabled:opacity-40 transition-colors cursor-pointer"
             >
-              {loading ? "Signing in..." : "Sign In"}
+              {loading ? "Signing in..." : "Sign in"}
             </button>
           </form>
         </div>
@@ -193,128 +143,155 @@ export default function AdminApp() {
     );
   }
 
-  // Gallery detail view
+  // ─── GALLERY DETAIL ─────────────────────────────────────────────
   if (view === "gallery" && activeGallery) {
     return (
-      <div className="min-h-screen bg-stone-50">
-        <div className="border-b border-stone-200 bg-white">
-          <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => { setView("list"); setActiveGallery(null); }} className="text-stone-400 hover:text-stone-600">&larr; Back</button>
+      <div className="min-h-screen bg-[#0a0a0a]">
+        {/* Top bar */}
+        <div className="sticky top-0 z-30 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-[#1a1a1a]">
+          <div className="max-w-[1600px] mx-auto px-8 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <button onClick={() => { setView("list"); setActiveGallery(null); }}
+                className="text-[#555] hover:text-white text-sm transition-colors">
+                ← Galleries
+              </button>
+              <div className="w-px h-5 bg-[#1a1a1a]" />
               <div>
-                <h1 className="text-lg font-medium text-stone-800">{activeGallery.title}</h1>
-                <p className="text-xs text-stone-400">{photos.length} photos &middot; /{activeGallery.slug} &middot; <a href={`https://v1.onemoreday.net/g/${activeGallery.slug}`} target="_blank" className="text-stone-500 hover:text-stone-700 underline">Preview</a></p>
+                <h1 className="text-sm font-medium text-white">{activeGallery.title}</h1>
+                <p className="text-xs text-[#444]">
+                  {photos.length} photos · {activeGallery.slug}
+                  {" · "}
+                  <a href={`https://v1.onemoreday.net/g/${activeGallery.slug}`}
+                     target="_blank" className="hover:text-[#888] transition-colors">Preview ↗</a>
+                </p>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          {error && <div className="mb-4 bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">{error}</div>}
+        {/* Drop zone */}
+        <div className="max-w-[1600px] mx-auto px-8 py-12">
+          {error && (
+            <div className="mb-6 text-sm text-red-400 bg-red-400/5 border border-red-400/10 rounded-[8px] px-4 py-3">{error}</div>
+          )}
 
-          <div
+          <button
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files); }}
             onClick={() => fileRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-16 text-center cursor-pointer transition-all mb-8
-              ${dragOver ? "border-stone-500 bg-stone-100" : "border-stone-300 hover:border-stone-400"}
-              ${uploading ? "pointer-events-none opacity-50" : ""}`}
+            className={`w-full border border-dashed rounded-[16px] p-24 text-center transition-all cursor-pointer
+              ${dragOver ? "border-[#444] bg-[#111]" : "border-[#1a1a1a] hover:border-[#2a2a2a]"}
+              ${uploading ? "pointer-events-none opacity-40" : ""}`}
           >
             <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden"
               onChange={(e) => e.target.files && handleUpload(e.target.files)} />
             {uploading ? (
-              <div>
-                <div className="w-10 h-10 border-2 border-stone-300 border-t-stone-700 rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-stone-500">Uploading...</p>
+              <div className="space-y-3">
+                <div className="w-8 h-8 border-2 border-[#333] border-t-white rounded-full animate-spin mx-auto" />
+                <p className="text-sm text-[#555]">Uploading...</p>
               </div>
             ) : (
               <div>
-                <p className="text-lg font-medium text-stone-500">Drop photos here</p>
-                <p className="text-sm text-stone-400 mt-1">or click to browse &middot; JPG, PNG, WebP</p>
+                <p className="text-sm font-medium text-[#666]">Drop photos here</p>
+                <p className="text-xs text-[#333] mt-1">or click to browse · JPG, PNG, WebP</p>
               </div>
             )}
-          </div>
+          </button>
+        </div>
 
-          {photos.length > 0 ? (
-            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+        {/* Photo grid */}
+        {photos.length > 0 && (
+          <div className="max-w-[1600px] mx-auto px-8 pb-24">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-px bg-[#0a0a0a]">
               {photos.map((p) => (
-                <PhotoTile key={p.id} photo={p} onDelete={async () => {
-                  await apiCall(`/api/photos/${p.id}`, { method: "DELETE" });
-                  await loadGalleryDetail(activeGallery.id);
-                }} />
+                <div key={p.id} className="group relative aspect-[4/3] bg-[#111] overflow-hidden">
+                  {p.thumbnailUrl ? (
+                    <img src={p.thumbnailUrl} alt={p.fileName} className="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="w-4 h-4 border border-[#333] border-t-white rounded-full animate-spin" />
+                    </div>
+                  )}
+                  <button
+                    onClick={async () => {
+                      if (!confirm("Delete?")) return;
+                      await apiCall(`/api/photos/${p.id}`, { method: "DELETE" });
+                      await loadPhotos(activeGallery.id);
+                    }}
+                    className="absolute top-2 right-2 w-7 h-7 bg-black/70 text-[#888] hover:text-white hover:bg-red-500/80 rounded-[6px] flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
             </div>
-          ) : (
-            <div className="text-center py-24 text-stone-300">
-              <p className="text-lg">Drop photos above to start</p>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // Gallery list
+  // ─── GALLERY LIST ───────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-stone-50">
-      <div className="border-b border-stone-200 bg-white">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="text-lg font-medium text-stone-800">Galleries</h1>
-          <div className="flex items-center gap-2">
-            <button onClick={handleCreateGallery} className="px-4 py-2 bg-stone-900 text-white text-sm rounded-lg hover:bg-stone-800 transition-colors">
-              New Gallery
+    <div className="min-h-screen bg-[#0a0a0a]">
+      <div className="sticky top-0 z-30 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-[#1a1a1a]">
+        <div className="max-w-[1200px] mx-auto px-8 py-4 flex items-center justify-between">
+          <h1 className="text-sm font-medium text-white">Galleries</h1>
+          <div className="flex items-center gap-3">
+            <button onClick={handleCreate}
+              className="text-sm text-[#888] hover:text-white transition-colors cursor-pointer">
+              New
             </button>
-            <button onClick={handleLogout} className="px-3 py-1.5 text-sm text-stone-400 hover:text-stone-600 transition-colors">
-              Logout
+            <button onClick={handleLogout}
+              className="text-sm text-[#444] hover:text-[#888] transition-colors cursor-pointer">
+              Log out
             </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        {error && <div className="mb-4 bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">{error}</div>}
+      <div className="max-w-[1200px] mx-auto px-8 py-12">
+        {error && (
+          <div className="mb-8 text-sm text-red-400 bg-red-400/5 border border-red-400/10 rounded-[8px] px-4 py-3">{error}</div>
+        )}
 
         {galleries.length === 0 ? (
-          <div className="text-center py-24">
-            <p className="text-stone-400 text-lg mb-4">No galleries yet</p>
-            <button onClick={handleCreateGallery} className="text-stone-600 hover:text-stone-800 underline text-sm">
+          <div className="text-center py-32">
+            <p className="text-sm text-[#555]">No galleries yet</p>
+            <button onClick={handleCreate} className="mt-4 text-sm text-[#888] hover:text-white transition-colors">
               Create your first gallery
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-px">
             {galleries.map((g) => (
-              <div key={g.id} className="flex items-center justify-between bg-white border border-stone-200 rounded-xl px-5 py-4">
+              <div key={g.id}
+                className="group flex items-center justify-between px-6 py-5 hover:bg-[#111] transition-colors rounded-[8px]">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-stone-800 truncate">{g.title}</h3>
-                    <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full ${
-                      g.status === "PUBLISHED" ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-500"
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-sm text-white truncate">{g.title}</h3>
+                    <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                      g.status === "PUBLISHED" ? "text-[#888]" : "text-[#444]"
                     }`}>{g.status}</span>
                   </div>
-                  <p className="text-xs text-stone-400 mt-0.5">
-                    /{g.slug} &middot; {g._count.photos} photos
+                  <p className="text-xs text-[#333] mt-0.5">
+                    {g.slug} · {g._count.photos} photos
                     {g.status === "PUBLISHED" && (
-                      <> &middot; <a href={`https://v1.onemoreday.net/g/${g.slug}`} target="_blank" className="text-stone-500 hover:text-stone-700 underline">View</a></>
+                      <> · <a href={`https://v1.onemoreday.net/g/${g.slug}`}
+                           target="_blank" className="text-[#555] hover:text-[#888] transition-colors">Preview ↗</a></>
                     )}
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handlePublish(g)}
-                    className="px-3 py-1.5 text-xs text-stone-500 hover:bg-stone-100 rounded-lg transition-colors"
-                  >
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => handlePublish(g)}
+                    className="px-3 py-1.5 text-xs text-[#666] hover:text-white hover:bg-[#1a1a1a] rounded-[6px] transition-colors cursor-pointer">
                     {g.status === "PUBLISHED" ? "Unpublish" : "Publish"}
                   </button>
-                  <button
-                    onClick={async () => {
-                      setActiveGallery(g);
-                      setView("gallery");
-                      await loadGalleryDetail(g.id);
-                    }}
-                    className="px-3 py-1.5 text-xs bg-stone-800 text-white rounded-lg hover:bg-stone-700 transition-colors"
-                  >
+                  <button onClick={async () => {
+                    setActiveGallery(g); setView("gallery"); await loadPhotos(g.id);
+                  }}
+                  className="px-3 py-1.5 text-xs text-white bg-white/10 hover:bg-white/20 rounded-[6px] transition-colors cursor-pointer">
                     Manage
                   </button>
                 </div>
@@ -323,26 +300,6 @@ export default function AdminApp() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function PhotoTile({ photo, onDelete }: { photo: Photo; onDelete: () => void }) {
-  return (
-    <div className="group relative aspect-square bg-stone-100 rounded-lg overflow-hidden">
-      {photo.thumbnailUrl ? (
-        <img src={photo.thumbnailUrl} alt={photo.fileName} className="w-full h-full object-cover" />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <div className="w-5 h-5 border-2 border-stone-300 border-t-stone-500 rounded-full animate-spin" />
-        </div>
-      )}
-      <button
-        onClick={onDelete}
-        className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-      >
-        &times;
-      </button>
     </div>
   );
 }

@@ -1,45 +1,26 @@
 import { notFound } from "next/navigation";
 import { GalleryView } from "@/components/gallery/GalleryView";
 
-interface GalleryPageProps {
-  params: Promise<{ slug: string }>;
-}
-
-export default async function GalleryPage({ params }: GalleryPageProps) {
+export default async function GalleryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-
   let gallery;
   try {
-    const res = await fetch(`${API_URL}/api/galleries/public/${slug}`, {
-      next: { revalidate: 60 },
-    });
+    const res = await fetch(`${API_URL}/api/galleries/public/${slug}`, { next: { revalidate: 60 } });
     if (!res.ok) notFound();
     gallery = await res.json();
-  } catch {
-    notFound();
-  }
+  } catch { notFound(); }
 
   if (gallery.protected) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-50">
-        <div className="text-center max-w-sm mx-auto px-6">
-          <h1 className="text-2xl font-light text-stone-800">
-            {gallery.title}
-          </h1>
-          <p className="mt-3 text-stone-500">This gallery is password protected.</p>
-          <form className="mt-6 space-y-3" action={`/g/${slug}/verify`} method="post">
-            <input
-              type="password"
-              name="password"
-              placeholder="Enter password"
-              className="w-full px-4 py-3 border border-stone-200 rounded-lg bg-white text-stone-800 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400"
-              required
-            />
-            <button
-              type="submit"
-              className="w-full px-6 py-3 bg-stone-900 text-white rounded-lg hover:bg-stone-800 transition-colors font-medium"
-            >
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center px-6">
+        <div className="w-full max-w-sm text-center">
+          <h1 className="text-2xl font-light text-white">{gallery.title}</h1>
+          <p className="text-sm text-[#555] mt-2">Password protected</p>
+          <form className="mt-8 space-y-3">
+            <input type="password" name="password" placeholder="Enter password"
+              className="w-full bg-[#111] border border-[#222] rounded-[8px] px-4 py-3 text-sm text-white placeholder:text-[#444] focus:outline-none focus:border-[#333]" />
+            <button className="w-full py-3 bg-white text-black text-sm font-medium rounded-[8px] hover:bg-[#e5e5e5] transition-colors">
               View Gallery
             </button>
           </form>
