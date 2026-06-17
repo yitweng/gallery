@@ -177,9 +177,16 @@ galleriesRouter.delete("/:id", requireAuth, async (req: Request, res: Response) 
 galleriesRouter.get("/:id/photos", async (req: Request, res: Response) => {
   const id = p(req, "id");
   const gallery = await prisma.gallery.findUnique({
-    where: { id, status: "PUBLISHED" },
+    where: { id },
   });
   if (!gallery) {
+    res.status(404).json({ error: "NOT_FOUND", message: "Gallery not found", statusCode: 404 });
+    return;
+  }
+
+  // Require auth OR published status for photo access
+  const isAdmin = req.headers.authorization?.startsWith("Bearer ");
+  if (!isAdmin && gallery.status !== "PUBLISHED") {
     res.status(404).json({ error: "NOT_FOUND", message: "Gallery not found", statusCode: 404 });
     return;
   }
