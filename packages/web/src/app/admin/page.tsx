@@ -206,7 +206,7 @@ export default function AdminApp() {
               <button onClick={() => { setView("list"); setActiveGallery(null); }} className="text-stone-400 hover:text-stone-600">&larr; Back</button>
               <div>
                 <h1 className="text-lg font-medium text-stone-800">{activeGallery.title}</h1>
-                <p className="text-xs text-stone-400">{allPhotos.length} photos &middot; /{activeGallery.slug}</p>
+                <p className="text-xs text-stone-400">{allPhotos.length} photos &middot; /{activeGallery.slug} &middot; <a href={`https://v1.onemoreday.net/g/${activeGallery.slug}`} target="_blank" className="text-stone-500 hover:text-stone-700 underline">Preview</a></p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -340,6 +340,9 @@ export default function AdminApp() {
                   </div>
                   <p className="text-xs text-stone-400 mt-0.5">
                     /{g.slug} &middot; {g._count.photos} photos
+                    {g.status === "PUBLISHED" && (
+                      <> &middot; <a href={`https://v1.onemoreday.net/g/${g.slug}`} target="_blank" className="text-stone-500 hover:text-stone-700 underline">View</a></>
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

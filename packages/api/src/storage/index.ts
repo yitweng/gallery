@@ -1,5 +1,6 @@
 const endpoint = process.env.STORAGE_ENDPOINT || "http://localhost:9000";
 const bucket = process.env.STORAGE_BUCKET || "gallery-dev";
+const publicUrl = process.env.STORAGE_PUBLIC_URL || endpoint;
 
 export const storage = {
   async upload(key: string, buffer: Buffer, contentType: string): Promise<string> {
@@ -20,5 +21,9 @@ export const storage = {
     const url = `${endpoint}/${bucket}/${key}`;
     const res = await fetch(url, { method: "DELETE" });
     if (!res.ok && res.status !== 404) throw new Error(`Delete failed: ${res.status}`);
+  },
+
+  getPublicUrl(key: string): string {
+    return `${publicUrl}/${bucket}/${key}`;
   },
 };

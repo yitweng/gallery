@@ -1,18 +1,13 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
-import { Queue } from "bullmq";
+import sharp from "sharp";
+import { encode } from "blurhash";
 import { v4 as uuid } from "uuid";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { p } from "../middleware/params.js";
 import { storage } from "../storage/index.js";
-import { PHOTO_ACCEPT_MIMES, MAX_UPLOAD_SIZE } from "@gallery/shared";
-
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
-
-const processImageQueue = new Queue("process-image", {
-  connection: { url: REDIS_URL },
-});
+import { PHOTO_ACCEPT_MIMES, MAX_UPLOAD_SIZE, THUMBNAIL_WIDTH, PREVIEW_WIDTH } from "@gallery/shared";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -27,6 +22,35 @@ const upload = multer({
 });
 
 export const photosRouter = Router();
+
+async function generateThumbnail(buffer: Buffer) {
+  const image = sharp(buffer);
+  const meta = await image.metadata();
+  const w = Math.min(THUMBNAIL_WIDTH, meta.width || THUMBNAIL_WIDTH);
+  return image.resize(w, undefined, { withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+}
+
+async function generatePreview(buffer: Buffer) {
+  const image = sharp(buffer);
+  const meta = await image.metadata();
+  const w = Math.min(PREVIEW_WIDTH, meta.width || PREVIEW_WIDTH);
+  return image.resize(w, undefined, { withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+}
+
+function generateBlurhash(buffer: Buffer): Promise<string> {
+  return new Promise((resolve) => {
+    sharp(buffer)
+      .raw()
+      .ensureAlpha()
+      .resize(32, 32, { fit: "inside" })
+      .toBuffer((err, data, info) => {
+        if (err || !data) { resolve("LEHV6nWB2yk8pyo0adR*.7kCMdnj"); return; }
+        try {
+          resolve(encode(new Uint8ClampedArray(data), info.width, info.height, 4, 4));
+        } catch { resolve("LEHV6nWB2yk8pyo0adR*.7kCMdnj"); }
+      });
+  });
+}
 
 photosRouter.post(
   "/upload/:galleryId",
@@ -49,38 +73,57 @@ photosRouter.post(
       return;
     }
 
-    let sortCounter = 0;
-    const photos = await Promise.all(
-      files.map(async (file) => {
-        const id = uuid();
-        const ext = file.originalname.split(".").pop() || "jpg";
-        const key = `photos/${id}/original.${ext}`;
+    const results: unknown[] = [];
 
-        await storage.upload(key, file.buffer, file.mimetype);
+    for (const file of files) {
+      const id = uuid();
+      const ext = file.originalname.split(".").pop() || "jpg";
+      const baseKey = `photos/${id}`;
+
+      try {
+        const [thumb, preview, blurhash, originalMeta] = await Promise.all([
+          generateThumbnail(file.buffer),
+          generatePreview(file.buffer),
+          generateBlurhash(file.buffer),
+          sharp(file.buffer).metadata(),
+        ]);
+
+        await Promise.all([
+          storage.upload(`${baseKey}/original.${ext}`, file.buffer, file.mimetype),
+          storage.upload(`${baseKey}/thumb.jpg`, thumb, "image/jpeg"),
+          storage.upload(`${baseKey}/preview.jpg`, preview, "image/jpeg"),
+        ]);
 
         const photo = await prisma.photo.create({
           data: {
             id,
             galleryId,
             collectionId: collectionId || null,
-            originalKey: key,
+            originalKey: `${baseKey}/original.${ext}`,
+            thumbnailKey: `${baseKey}/thumb.jpg`,
+            previewKey: `${baseKey}/preview.jpg`,
             fileName: file.originalname,
             fileSize: BigInt(file.size),
-            sortOrder: sortCounter++,
+            width: originalMeta.width || null,
+            height: originalMeta.height || null,
+            blurhash,
           },
         });
 
-        await processImageQueue.add(`process-${id}`, {
-          photoId: id,
-          buffer: file.buffer,
-          fileName: file.originalname,
+        results.push({
+          id: photo.id,
+          fileName: photo.fileName,
+          thumbnailUrl: storage.getPublicUrl(photo.thumbnailKey!),
+          previewUrl: storage.getPublicUrl(photo.previewKey!),
+          width: photo.width,
+          height: photo.height,
         });
+      } catch (err) {
+        console.error(`Failed to process ${file.originalname}:`, err);
+      }
+    }
 
-        return photo;
-      })
-    );
-
-    res.status(201).json({ uploaded: photos.length, photos });
+    res.status(201).json({ uploaded: results.length, photos: results });
   }
 );
 
@@ -95,10 +138,7 @@ photosRouter.patch("/:id", requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
-  const updated = await prisma.photo.update({
-    where: { id },
-    data: req.body,
-  });
+  const updated = await prisma.photo.update({ where: { id }, data: req.body });
   res.json(updated);
 });
 
@@ -128,13 +168,10 @@ photosRouter.get("/:id", async (req: Request, res: Response) => {
     res.status(404).json({ error: "NOT_FOUND", message: "Photo not found", statusCode: 404 });
     return;
   }
-
-  const publicUrl = process.env.STORAGE_PUBLIC_URL || "http://localhost:9000";
-
   res.json({
     ...photo,
-    thumbnailUrl: photo.thumbnailKey ? `${publicUrl}/${photo.thumbnailKey}` : null,
-    previewUrl: photo.previewKey ? `${publicUrl}/${photo.previewKey}` : null,
-    originalUrl: photo.originalKey ? `${publicUrl}/${photo.originalKey}` : null,
+    thumbnailUrl: photo.thumbnailKey ? storage.getPublicUrl(photo.thumbnailKey) : null,
+    previewUrl: photo.previewKey ? storage.getPublicUrl(photo.previewKey) : null,
+    originalUrl: photo.originalKey ? storage.getPublicUrl(photo.originalKey) : null,
   });
 });
