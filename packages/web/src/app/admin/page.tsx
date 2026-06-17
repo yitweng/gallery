@@ -45,6 +45,7 @@ export default function AdminApp() {
   // Gallery detail state
   const [activeGallery, setActiveGallery] = useState<Gallery | null>(null);
   const [collections, setCollections] = useState<CollectionData[]>([]);
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState("");
@@ -87,8 +88,8 @@ export default function AdminApp() {
 
   async function loadGalleryDetail(galleryId: string) {
     try {
-      const data = await apiCall(`/api/galleries/${galleryId}`);
-      setCollections(data.collections || []);
+      const photoData = await apiCall(`/api/galleries/${galleryId}/photos?pageSize=200`);
+      setPhotos(photoData.items || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     }
@@ -194,8 +195,6 @@ export default function AdminApp() {
 
   // Gallery detail view
   if (view === "gallery" && activeGallery) {
-    const allPhotos = collections.flatMap((c) => c.photos);
-
     return (
       <div className="min-h-screen bg-stone-50">
         <div className="border-b border-stone-200 bg-white">
@@ -204,31 +203,8 @@ export default function AdminApp() {
               <button onClick={() => { setView("list"); setActiveGallery(null); }} className="text-stone-400 hover:text-stone-600">&larr; Back</button>
               <div>
                 <h1 className="text-lg font-medium text-stone-800">{activeGallery.title}</h1>
-                <p className="text-xs text-stone-400">{allPhotos.length} photos &middot; /{activeGallery.slug} &middot; <a href={`https://v1.onemoreday.net/g/${activeGallery.slug}`} target="_blank" className="text-stone-500 hover:text-stone-700 underline">Preview</a></p>
+                <p className="text-xs text-stone-400">{photos.length} photos &middot; /{activeGallery.slug} &middot; <a href={`https://v1.onemoreday.net/g/${activeGallery.slug}`} target="_blank" className="text-stone-500 hover:text-stone-700 underline">Preview</a></p>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={selectedCollection}
-                onChange={(e) => setSelectedCollection(e.target.value)}
-                className="text-sm border border-stone-200 rounded-lg px-3 py-1.5 bg-white"
-              >
-                <option value="">Upload to: All</option>
-                {collections.map((c) => (
-                  <option key={c.id} value={c.id}>{c.title}</option>
-                ))}
-              </select>
-              <button
-                onClick={async () => {
-                  const title = prompt("Collection name:");
-                  if (!title || !activeGallery) return;
-                  await apiCall(`/api/galleries/${activeGallery.id}/collections`, { method: "POST", body: { title } });
-                  await loadGalleryDetail(activeGallery.id);
-                }}
-                className="text-sm px-3 py-1.5 text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-              >
-                + Collection
-              </button>
             </div>
           </div>
         </div>
@@ -236,7 +212,6 @@ export default function AdminApp() {
         <div className="max-w-6xl mx-auto px-6 py-8">
           {error && <div className="mb-4 bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">{error}</div>}
 
-          {/* Drop zone */}
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -261,32 +236,14 @@ export default function AdminApp() {
             )}
           </div>
 
-          {/* Photos */}
-          {collections.length > 0 ? (
-            collections.map((col) => (
-              <div key={col.id} className="mb-8">
-                <h3 className="text-sm font-medium text-stone-600 mb-3">{col.title} ({col.photos.length})</h3>
-                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                  {col.photos.map((p) => (
-                    <PhotoTile key={p.id} photo={p} onDelete={async () => {
-                      await apiCall(`/api/photos/${p.id}`, { method: "DELETE" });
-                      await loadGalleryDetail(activeGallery.id);
-                    }} />
-                  ))}
-                </div>
-              </div>
-            ))
-          ) : allPhotos.length > 0 ? (
-            <div>
-              <h3 className="text-sm font-medium text-stone-600 mb-3">All Photos ({allPhotos.length})</h3>
-              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                {allPhotos.map((p) => (
-                  <PhotoTile key={p.id} photo={p} onDelete={async () => {
-                    await apiCall(`/api/photos/${p.id}`, { method: "DELETE" });
-                    await loadGalleryDetail(activeGallery.id);
-                  }} />
-                ))}
-              </div>
+          {photos.length > 0 ? (
+            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              {photos.map((p) => (
+                <PhotoTile key={p.id} photo={p} onDelete={async () => {
+                  await apiCall(`/api/photos/${p.id}`, { method: "DELETE" });
+                  await loadGalleryDetail(activeGallery.id);
+                }} />
+              ))}
             </div>
           ) : (
             <div className="text-center py-24 text-stone-300">
