@@ -13,11 +13,9 @@ async function apiCall(path: string, options: Record<string, unknown> = {}) {
   let body: BodyInit | undefined;
   if (options.body instanceof FormData) {
     body = options.body;
-  } else if (options.body && typeof options.body !== "string") {
+  } else if (options.body != null) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
-  } else if (typeof options.body === "string") {
-    body = options.body;
   }
 
   const res = await fetch(path, {
@@ -66,7 +64,7 @@ export default function AdminApp() {
     try {
       const data = await apiCall("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: { email, password },
       });
       setToken(data.token);
       setView("list");
