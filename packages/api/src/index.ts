@@ -8,6 +8,10 @@ import { ordersRouter } from "./routes/orders.js";
 import { errorHandler } from "./middleware/error.js";
 import { requestLogger } from "./middleware/logger.js";
 
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+  return this.toString();
+};
+
 const app = express();
 const PORT = process.env.API_PORT || 3001;
 
