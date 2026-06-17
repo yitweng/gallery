@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GalleryStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum DownloadPermission {
+  NONE
+  SINGLE
+  SELECTION
+  ALL
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  galleries Gallery[]
+
+  @@map("users")
+}
+
+model Gallery {
+  id          String         @id @default(cuid())
+  userId      String         @map("user_id")
+  title       String
+  slug        String         @unique
+  description String?
+  coverImage  String?        @map("cover_image")
+  status      GalleryStatus  @default(DRAFT)
+  password    String?
+  downloadPin String?        @map("download_pin")
+  downloadPermission DownloadPermission @default(ALL) @map("download_permission")
+  favoritesEnabled Boolean   @default(true) @map("favorites_enabled")
+  watermarkEnabled Boolean   @default(false) @map("watermark_enabled")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  user        User           @relation(fields: [userId], references: [id])
+  collections Collection[]
+  photos      Photo[]
+  downloadLogs DownloadLog[]
+
+  @@map("galleries")
+}
+
+model Collection {
+  id        String   @id @default(cuid())
+  galleryId String   @map("gallery_id")
+  title     String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  gallery   Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  photos    Photo[]
+
+  @@map("collections")
+}
+
+model Photo {
+  id           String   @id @default(cuid())
+  galleryId    String   @map("gallery_id")
+  collectionId String?  @map("collection_id")
+  originalKey  String   @map("original_key")
+  fileName     String   @map("file_name")
+  fileSize     BigInt   @map("file_size")
+  width        Int?
+  height       Int?
+  thumbnailKey String?  @map("thumbnail_key")
+  previewKey   String?  @map("preview_key")
+  blurhash     String?
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  gallery      Gallery     @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  faces        Face[]
+  favorites    Favorite[]
+  orderItems   OrderItem[]
+
+  @@index([galleryId])
+  @@map("photos")
+}
+
+model Face {
+  id        String   @id @default(cuid())
+  photoId   String   @map("photo_id")
+  descriptor Json
+  x         Float?
+  y         Float?
+  width     Float?
+  height    Float?
+  personLabel String? @map("person_label")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@index([photoId])
+  @@map("faces")
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  photoId   String   @map("photo_id")
+  clientId  String   @map("client_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@unique([photoId, clientId])
+  @@map("favorites")
+}
+
+model DownloadLog {
+  id        String   @id @default(cuid())
+  galleryId String   @map("gallery_id")
+  ip        String?
+  userAgent String?  @map("user_agent")
+  downloadType String @map("download_type")
+  photoCount Int     @default(0) @map("photo_count")
+  sizeBytes  BigInt  @default(0) @map("size_bytes")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  gallery    Gallery  @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+
+  @@index([galleryId])
+  @@map("download_logs")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String
+  priceMyr    Decimal  @map("price_myr")
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  orderItems  OrderItem[]
+
+  @@map("products")
+}
+
+model Order {
+  id          String   @id @default(cuid())
+  galleryId   String?  @map("gallery_id")
+  clientEmail String   @map("client_email")
+  clientName  String?  @map("client_name")
+  status      String   @default("pending")
+  totalMyr    Decimal  @map("total_myr")
+  stripeSessionId String? @map("stripe_session_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  items       OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String   @map("order_id")
+  productId String   @map("product_id")
+  photoId   String   @map("photo_id")
+  quantity  Int      @default(1)
+  priceMyr  Decimal  @map("price_myr")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id])
+  photo     Photo    @relation(fields: [photoId], references: [id])
+
+  @@map("order_items")
+}

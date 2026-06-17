@@ -1,0 +1,23 @@
+{
+  "name": "@gallery/worker",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gallery/shared": "*",
+    "@prisma/client": "^7.8.0",
+    "bullmq": "^5.78.1",
+    "ioredis": "^5.11.1",
+    "sharp": "^0.35.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "~5.9.3"
+  }
+}
