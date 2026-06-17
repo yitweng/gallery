@@ -12,6 +12,7 @@
   "dependencies": {
     "@gallery/shared": "*",
     "@prisma/client": "^7.8.0",
+    "@prisma/adapter-pg": "^7.8.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.78.1",
     "cors": "^2.8.6",
