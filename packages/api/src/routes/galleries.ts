@@ -51,12 +51,15 @@ galleriesRouter.get("/public/:slug", async (req: Request, res: Response) => {
   });
 
   if (uncategorizedPhotos.length > 0) {
-    collections.push({
+    const allCollection = {
       id: "__all__",
       title: "All Photos",
       sortOrder: -1,
+      createdAt: new Date(),
+      galleryId: gallery.id,
       photos: uncategorizedPhotos.map(photoWithUrls),
-    } as ReturnType<typeof collections>[0]);
+    };
+    collections.push(allCollection);
   }
 
   res.json({
